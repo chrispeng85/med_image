@@ -242,7 +242,7 @@ def main():
         transforms.ToPILImage(),
         transforms.RandomResizedCrop(224),
         transforms.RandomRotation(10),
-        transforms.RandomAffine(0, shear = 10, scle = (0.8,1.2)),
+        transforms.RandomAffine(0, shear = 10, scale = (0.8,1.2)),
         transforms.ColorJitter(brightness = 0.2, contrast = 0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean = [0.485, 0.456, 0.406],
