@@ -180,7 +180,10 @@ def main():
     num_classes = 3
     num_epochs = 20
     batch_size = 16
-    learning_rate = 0.01
+    learning_rate = 0.001
+
+    import os
+    
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -189,7 +192,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(model.parameters(), lr = learning_rate)
     
-    base_path = 'C:/Users/77204/Downloads/medical images/Knee Osteoarthritis Classification'
+    data_dir = "/root/med_image/'medical images'/'Knee Osteoarthritis Classification'"
     categories = ['Normal', 'Osteopenia', 'Osteoporosis']
     splits = ['train', 'test', 'val']
 
@@ -199,7 +202,7 @@ def main():
 
         for label, category in enumerate(categories):
             
-            path = os.path.join(base_path, split, category)
+            path = os.path.join(data_dir, split, category)
 
 
             image_files = [f for f in os.listdir(path) if f.endswith(('.png', '.jpg', '.jpeg'))]
@@ -294,6 +297,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
