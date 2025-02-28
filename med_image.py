@@ -122,7 +122,7 @@ class ResNet(nn.Module):
             ResisualStack(16,32,2,n),
             ResidualStack(32,64,2,n),
             nn.AvgPool2d(8),
-            Lambda(lambda x: x.squeeze)),
+            Lambda(lambda x: x.squeeze),
             nn.Linear(64, num_classes)
         )
     def forward(self, x):
