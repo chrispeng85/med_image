@@ -224,7 +224,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(model.parameters(), lr = learning_rate)
     
-    data_dir = "/root/med_image/medical images/Knee Osteoarthritis Classification"
+    data_dir = "/root/med_images/medical images/Knee Osteoarthritis Classification"
     categories = ['Normal', 'Osteopenia', 'Osteoporosis']
     splits = ['train', 'test', 'val']
 
