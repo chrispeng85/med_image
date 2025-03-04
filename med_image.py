@@ -9,124 +9,14 @@ from torchvision import transforms
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import Dataset
 import os
+
+os.environ["PYTORCH_CUDA_ALOC_CONF"] = "expandable_segments:True"
+
 from PIL import Image
-
-
+from torch.optim.lr_scheduler import StepLR
+from torchvision import models
 from torch.utils.data.sampler import SubsetRandomSampler
-
-
-class ResidualBlock(nn.Module):
-
-    def __init__(self, in_channels, out_channels, stride = 1, downsample = None):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size = 3, stride = stride, padding = 1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU()
-
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(out_channels, out_channels, kernel_size = 3, stride = 1, padding = 1),
-            nn.BatchNorm2d(out_channels)
-        )
-        self.downsample = downsample
-        
-        
-
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU()
-        
-        self.out_channels = out_channels
-
-    def forward(self, x):
-        residual  = x
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out) + self.skip(x)
-
-        out = self.relu(out)
-
-        return out
-
-
-class Dropout(nn.Module):
-
-    def __init__(self,p):
-        super().__init__()
-        self.p = p
-        #dropout probability
-
-    def forward(self, input):
-        p = self.p
-        bernoulli_distr = torch.distributions.bernoulli.Bernoulli(torch.tensor[p])
-        index_zero = bernoulli_distr.sample(input.shape).squeeze()
-        index_zero = index_zero.type(torch.BoolTensor)
-        input[index_zero] = 0
-        return 1/(1-p) * input
-
-class BatchNorm(nn.Module):
-    def __init__(self, num_features):
-        super().__init__()
-
-        self.gamma = nn.Parameter(torch.ones(num_features))
-        self.beta = nn.Parameter(torch.zeros(num_features))
-
-    def forward(self, input):
-
-        eps = 1e-5
-        batch_mean = torch.mean(input, 0)
-        temp = torch.zeros_like(input)
-        for i in range(input.shape[1]):
-            temp[:, i, :] = (input[:, i, :] - batch_mean[i, :])**2
-        batch_var = torch.mean(temp, 0)
-
-        for i in range(input.shape[1]):
-            input[:, i, :] = (input[:, i, :] - batch_mean[i, :])/torch.sqrt(batch_var[i, :] + eps)
-            input[:, i, :] = self.gamma[i] * input[:, i, :] + self.beta[i]
-
-        return input
-
-
-class ResidualStack(nn.Module):
-    def __init__(self, in_channels, out_channels, stride, num_blocks):
-        super().__init__()
-        self.residual_stack = nn.ModuleList([ResidualBlock(in_channels, out_channels, stride)])
-        self.residual_stack.extend([ResidualBlock(out_channels, out_channels, 1) for i in range(1, num_blocks)])
-
-    def forward(self, input):
-        out = input
-        for layer in self.residual_stack:
-            out = layer(out)
-
-        return out
-
-class Lambda(nn.Module):
-    def __init__(self, func):
-        super().__init__()
-        self.func = fun
-    def forward(self, x):
-        return self.func(x)
-
-class ResNet(nn.Module):
-    def __init__(self, num_classes, n =2):
-        super(ResNet, self).__init__()
-        self.resnet = nn.Sequential(
-
-            nn.Conv2d(3, 16 ,3, padding = 1, stride = 1, bias = False),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            ResidualStack(16,16,1,n),
-            ResisualStack(16,32,2,n),
-            ResidualStack(32,64,2,n),
-            nn.AvgPool2d(8),
-            Lambda(lambda x: x.squeeze)),
-            nn.Linear(64, num_classes)
-        )
-    def forward(self, x):
-        return self.resnet(x)
+from torch.cuda.amp import autocast, GradScaler
 
 
 class dataset(Dataset):
@@ -154,44 +44,80 @@ class dataset(Dataset):
             img = self.transform(img)
 
         return img, label
-    
 
-def train(model, train_loader, test_loader, val_loader, criterion, optimizer, num_epochs, device):
+
+
+
+
+def train(ensemble_list, train_loader, test_loader, val_loader, criterion, num_epochs, device):
 
     total_step = len(train_loader)
-
-    for epoch in range(num_epochs):
-
-        for i, (images, labels) in enumerate(train_loader):
-            images = images.to(device)
-            labels = labels.to(device)
-
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            del images, labels, outputs
-        print('epoch [{}/{}], loss: {:.4f}'.format(epoch+1, num_epochs, loss.item()))
-
-    with torch.no_grad():
-        correct = 0
-        total = 0
-        for images, labels in val_loader:
-            images = images.to(device)
-            labels = labels.to(device)
-            outputs = model(images)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-        print('accuracy: {}%'.format(100 * correct / total))
+    
+   
 
     
-    with torch.no_grad():
-        correct = 0
-        total = 0
+    for epoch in range(num_epochs):
+
+        for model, optimizer in ensemble_list:
+            model.train()
+            for images, labels in train_loader:
+                images = images.to(device)
+                labels = labels.to(device)
+
+                with autocast():
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            
+
+                del images, labels, outputs
+            print('epoch [{}/{}], loss: {:.4f}'.format(epoch+1, num_epochs, loss.item()))
+
+            
+        #individual eval
+        for model, _ in ensemble_list: 
+            model.eval()
+            with torch.no_grad():
+                correct = 0
+                total = 0
+                for images, labels in val_loader:
+                    images = images.to(device)
+                    labels = labels.to(device)
+                    outputs = model(images)
+                    _, predicted = torch.max(outputs.data, 1)
+                    total += labels.size(0)
+                    correct += (predicted == labels).sum().item()
+
+                print('accuracy: {}%'.format(100 * correct / total))
+
+        #ensemble eval
+        with torch.no_grad():
+            correct = 0
+            total = 0
+            for images, labels in val_loader:
+                images = images.to(device)
+                labels = labels.to(device)
+
+                ensemble_outputs = torch.zeros(labels.size(0), outputs.size(1)).to(device)
+
+                for model, _ in ensemble_list:
+                    model.eval()
+                    outputs = model(images)
+                    ensemble_outputs += outputs
+
+                _, predicted = torch.max(ensemble_outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+            print(f'ensemble validation accuracy: {100 * correct / total:.2f}%')
+
+        #eval on test 
+        with torch.no_grad():
+            correct = 0
+            total = 0
         for images, labels in test_loader:
             images = images.to(device)
             labels = labels.to(device)
@@ -210,20 +136,36 @@ def train(model, train_loader, test_loader, val_loader, criterion, optimizer, nu
 def main():
 
     num_classes = 3
-    num_epochs = 20
+    num_epochs = 64
     batch_size = 16
     learning_rate = 0.001
 
     import os
     
 
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = Resnet(ResidualBlock, [3,4,6,3]).to(device)
+    ensemble_list = []
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr = learning_rate)
-    
+    resnet = models.resnet50(weights = models.ResNet50_Weights.IMAGENET1K_V1)
+    resnet = resnet.to(device)
+    resnet_optim = torch.optim.SGD(resnet.parameters(), lr = learning_rate, momentum = 0.9)
+    #scheduler = StepLR(resnet_optim, step_size = 7, gamma = 0.1)
+    ensemble_list.append((resnet, resnet_optim))
+
+
+    efficientnet = models.efficientnet_b0(weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+    efficientnet = efficientnet.to(device)
+    efficient_optim = torch.optim.Adam(efficientnet.parameters(), lr= learning_rate)
+    ensemble_list.append((efficientnet, efficient_optim))
+
+    vit = models.vit_b_16(weights = models.ViT_B_16_Weights.IMAGENET1K_V1)
+    vit = vit.to(device)
+    vit_optim = torch.optim.SGD(vit.parameters(), lr = learning_rate, momentum = 0.9)
+    ensemble_list.append((vit, vit_optim))
+
+
     data_dir = "/root/med_images/Knee Osteoarthritis Classification"
     categories = ['Normal', 'Osteopenia', 'Osteoporosis']
     splits = ['train', 'test', 'val']
@@ -277,6 +219,8 @@ def main():
         transforms.RandomAffine(0, shear = 10, scale = (0.8,1.2)),
         transforms.ColorJitter(brightness = 0.2, contrast = 0.2),
         transforms.ToTensor(),
+        transforms.Lambda(lambda x: x + torch.randn_like(x)*0.01),
+        transforms.RandomErasing(p = 0.3, scale = (0.02, 0.1)),
         transforms.Normalize(mean = [0.485, 0.456, 0.406],
                              std = [0.229, 0.224, 0.225])
     ])
@@ -328,7 +272,12 @@ def main():
         pin_memory = True
     )
 
-    train(model, train_loader, test_loader, val_loader, criterion, optimizer, num_epochs, device)
+
+    criterion = nn.CrossEntropyLoss()
+
+
+
+    train(ensemble_list, train_loader, test_loader, val_loader, criterion, num_epochs, device)
 
 
 if __name__ == "__main__":
